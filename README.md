@@ -1,2 +1,2 @@
-# quant_projects
+# Dynamic Buy-Sell Manager
 Projects to learn more about quantitative finance 
