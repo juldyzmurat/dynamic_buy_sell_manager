@@ -70,6 +70,9 @@ def init_db():
     conn.close()
 
 
+def df_or_message(df, message="No recommendations for now😴"):
+    return df if not df.empty else message
+
 def backfill_portfolio(portfolio):
     conn = sqlite3.connect("trades.db")
     c = conn.cursor()
@@ -471,8 +474,14 @@ def run_analysis():
     buy_rsi_output = analyze_buy_rsi()
     buy_pct_output = analyze_buy_pct()
 
-    return sell_ma_output, sell_rsi_output, sell_pct_output, buy_ma_output, buy_rsi_output, buy_pct_output
-
+    return (
+        df_or_message(sell_ma_output),
+        df_or_message(sell_rsi_output),
+        df_or_message(sell_pct_output),
+        df_or_message(buy_ma_output),
+        df_or_message(buy_rsi_output),
+        df_or_message(buy_pct_output)
+    )
 init_db()
 
 with gr.Blocks() as demo:
