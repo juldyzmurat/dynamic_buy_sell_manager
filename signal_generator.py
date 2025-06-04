@@ -293,40 +293,44 @@ def sell_stock(ticker, quantity, price):
     return f"Sold {quantity:.4f} shares of {ticker} at ${price:.2f} — proceeds ${proceeds:.2f}"
 
 
-
-def get_rsi(ticker, period_days=14):
+#buy sell signals 
+def fetch_market_data(tickers, lookback_days=80):
     end = datetime.now()
-    start = end - timedelta(days=60)
-    data = yf.download(ticker, start=start, end=end, progress=False)
-    if data.empty or 'Close' not in data:
+    start = end - timedelta(days=lookback_days)
+    data = yf.download(tickers, start=start, end=end, group_by="ticker", progress=False)
+    return data
+tickers = list(set(portfolio.keys()).union(set(watchlist)))
+
+#get the data for all tickers for max horizon we need 
+data = fetch_market_data(tickers) 
+
+def get_rsi(data, ticker, period_days=14):
+    if ticker not in data or data[ticker].empty or 'Close' not in data[ticker]:
+        return None, None
+    series = data[ticker]['Close'].dropna()
+    if series.empty:
         return None, None
     try:
-        rsi_ind = ta.momentum.RSIIndicator(data['Close'].squeeze(), window=period_days)
-        data['RSI'] = rsi_ind.rsi()
+        rsi_ind = ta.momentum.RSIIndicator(series, window=period_days)
+        rsi_values = rsi_ind.rsi()
     except ZeroDivisionError:
-        return data['Close'].iloc[-1], None
-    
-    current_price = data['Close'].iloc[-1]
-    current_rsi = data['RSI'].dropna().iloc[-1] if not data['RSI'].dropna().empty else None
+        return series.iloc[-1], None
+    if rsi_values.dropna().empty:
+        return None, None
+    return series.iloc[-1], rsi_values.dropna().iloc[-1]
 
-    return current_price, current_rsi
-
-def get_ma_signals(ticker, short_window=20, long_window=50):
-    end = datetime.now()
-    start = end - timedelta(days=long_window+30)
-    data = yf.download(ticker, start=start, end=end, progress=False)
-    
-    if data.empty or 'Close' not in data:
+def get_ma_signals(data, ticker, short_window=20, long_window=50):
+    if ticker not in data or data[ticker].empty or 'Close' not in data[ticker]:
         return None
-    
-    short_ma = data['Close'].rolling(window=short_window).mean()
-    long_ma = data['Close'].rolling(window=long_window).mean()
-    
-    short_prev = short_ma.iloc[-2].item()
-    long_prev = long_ma.iloc[-2].item()
-    short_now = short_ma.iloc[-1].item()
-    long_now = long_ma.iloc[-1].item()
-    
+    series = data[ticker]['Close'].dropna()
+    if len(series) < long_window:
+        return None
+    short_ma = series.rolling(window=short_window).mean()
+    long_ma = series.rolling(window=long_window).mean()
+    short_prev = short_ma.iloc[-2]
+    long_prev = long_ma.iloc[-2]
+    short_now = short_ma.iloc[-1]
+    long_now = long_ma.iloc[-1]
     if short_prev < long_prev and short_now > long_now:
         return "Buy"
     elif short_prev > long_prev and short_now < long_now:
@@ -334,21 +338,17 @@ def get_ma_signals(ticker, short_window=20, long_window=50):
     else:
         return None
     
-def get_price_history(ticker, days=3):
-
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=days * 2)  
-    data = yf.download(ticker, start=start_date.strftime('%Y-%m-%d'), end=end_date.strftime('%Y-%m-%d'))
-    data = data['Close'][ticker]
-    closing_prices = data.dropna().tail(days)
-    return closing_prices
+def get_price_history(data, ticker, days=3):
+    if ticker not in data or data[ticker].empty or 'Close' not in data[ticker]:
+        return None
+    return data[ticker]['Close'].dropna().tail(days)
 
 # --- 3. SIGNAL FUNCTIONS --- #
 
-def analyze_sell_ma():
+def analyze_sell_ma(data):
     rows = []
     for ticker, info in portfolio.items():
-        ma_signal = get_ma_signals(ticker)
+        ma_signal = get_ma_signals(data,ticker)
         if ma_signal == "Sell":
             price, _ = get_rsi(ticker)
             if price is None:
@@ -367,15 +367,15 @@ def analyze_sell_ma():
     return pd.DataFrame(rows)
 
 
-def analyze_sell_rsi():
+def analyze_sell_rsi(data):
     rows = []
     for ticker, info in portfolio.items():
-        price, rsi = get_rsi(ticker)
+        price, rsi = get_rsi(data, ticker)
         if price is None or rsi is None:
             continue
         if rsi > 70:
-            cost = info['cost_basis']
-            quantity = info['quantity']
+            cost = portfolio[ticker]['cost_basis']
+            quantity = portfolio[ticker]['quantity']
             change_pct = (price - cost) / cost * 100
             gain = (price - cost) * quantity
             preview = f"${gain:.2f} at ${price:.2f}"
@@ -388,10 +388,10 @@ def analyze_sell_rsi():
     return pd.DataFrame(rows)
 
 
-def analyze_sell_pct():
+def analyze_sell_pct(data):
     rows = []
     for ticker, info in portfolio.items():
-        price, _ = get_rsi(ticker)
+        price, _ = get_rsi(data,ticker)
         if price is not None:
             price = price.item()  # Ensures the value is a Python float
             cost = info['cost_basis']
@@ -408,48 +408,44 @@ def analyze_sell_pct():
     return pd.DataFrame(rows)
 
 
-def analyze_buy_ma():
+def analyze_buy_ma(data):
     rows = []
-    for ticker in watchlist:
-        ma_signal = get_ma_signals(ticker)
-        if ma_signal == "Buy":
+    for ticker in data.columns.levels[0]:
+        signal = get_ma_signals(data, ticker)
+        if signal == "Buy":
             rows.append({"Ticker": ticker})
     return pd.DataFrame(rows)
 
-def analyze_buy_rsi():
-    buy_rsi_signals = []
-    for ticker in watchlist:
-        price, rsi = get_rsi(ticker)
+def analyze_buy_rsi(data):
+    rows = []
+    for ticker in data.columns.levels[0]:
+        price, rsi = get_rsi(data,ticker)
         if price is None or rsi is None:
             continue
         if rsi < 50:
-            buy_rsi_signals.append({"Ticker": ticker, "RSI": rsi})
-    
-    return pd.DataFrame(buy_rsi_signals) if buy_rsi_signals else pd.DataFrame(columns=["Ticker", "RSI"])
+            rows.append({"Ticker": ticker, "RSI": round(rsi, 2)})
+    return pd.DataFrame(rows)
 
-def analyze_buy_pct():
+def analyze_buy_pct(data):
     rows = []
-    rows = []
-    for ticker in watchlist:
+    for ticker in data.columns.levels[0]:
         try:
-            # Get recent prices (last 3 closing prices)
-            prices = get_price_history(ticker, days=3)
-            if len(prices) >= 2:
+            prices = get_price_history(data, ticker, days=3)
+            if prices is not None and len(prices) >= 2:
                 old_price = prices.iloc[0]
                 recent_price = prices.iloc[-1]
                 change_pct = (recent_price - old_price) / old_price * 100
 
-                # Only add to list if it's dropped in price
                 if change_pct < 0:
-                    print("change_pct<0")
                     rows.append({
                         "Ticker": ticker,
                         "% Change (3d)": round(change_pct, 2)
                     })
         except Exception as e:
             print(f"Error processing {ticker}: {e}")
-    
+
     return pd.DataFrame(rows)
+
 
 def get_portfolio_df():
     return pd.DataFrame.from_dict(portfolio, orient='index').reset_index().rename(columns={"index": "Ticker"})
@@ -467,12 +463,12 @@ def get_portfolio():
 # --- 4. GRADIO INTERFACE --- #
 
 def run_analysis():
-    sell_ma_output = analyze_sell_ma()
-    sell_rsi_output = analyze_sell_rsi()
-    sell_pct_output = analyze_sell_pct()
-    buy_ma_output = analyze_buy_ma()
-    buy_rsi_output = analyze_buy_rsi()
-    buy_pct_output = analyze_buy_pct()
+    sell_ma_output = analyze_sell_ma(data)
+    sell_rsi_output = analyze_sell_rsi(data)
+    sell_pct_output = analyze_sell_pct(data)
+    buy_ma_output = analyze_buy_ma(data)
+    buy_rsi_output = analyze_buy_rsi(data)
+    buy_pct_output = analyze_buy_pct(data)
 
     return (
         df_or_message(sell_ma_output),
@@ -482,7 +478,8 @@ def run_analysis():
         df_or_message(buy_rsi_output),
         df_or_message(buy_pct_output)
     )
-init_db()
+    
+#init_db()
 
 with gr.Blocks() as demo:
     gr.Markdown("## 📈 Portfolio Signal Generator")
