@@ -22,7 +22,7 @@ portfolio = {
     "BAYRY":{"cost_basis":6.48, "quantity": 2},
 }
 
-watchlist = ["MU", "FRHC", "CEE", "MAGS", "RUN", "AVGO", "NU", "GAP", "SHW", "SONY","ARM", "TCEHY","NVDA","AAPL","AMZN","AMD","AMC", "F", "JEMA","HLN", "STLA", "ORCL", "KSPI", "PH", "BAYRY"]
+watchlist = ["BRK-B","MU", "FRHC", "CEE", "MAGS", "RUN", "AVGO", "NU", "GAP", "SHW", "SONY","ARM", "TCEHY","NVDA","AAPL","AMZN","AMD","AMC", "F", "JEMA","HLN", "STLA", "ORCL", "KSPI", "PH", "BAYRY"]
 
 # --- 2. FUNCTIONS --- #
 
@@ -568,5 +568,3 @@ with gr.Blocks() as demo:
 
 
 demo.launch()
-
-# %%
